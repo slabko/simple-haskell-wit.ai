@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE MultiWayIf #-}
 
 module Main where
 
@@ -23,7 +22,7 @@ import           Data.Monoid (First)
 data AppState = AppState { 
     _context :: HashMap Text Value
   , _params  :: HashMap Text Text
-  , _config  :: Config 
+  , _config  :: Config IO
 } 
 
 makeLenses ''AppState
@@ -85,7 +84,7 @@ dateKey :: Getting (First Text) Value Text
 dateKey = key "datetime" . values . key "value" . _String
 
 --------------------------------------------------------------------------------
-makeConfig :: Text -> Config
+makeConfig :: Text -> Config IO
 makeConfig s = defaultConfig & W.token .~ "--- YOUR TOKEN HERE ---"
                              & W.session .~ s
 

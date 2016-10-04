@@ -21,10 +21,9 @@ import           Data.Aeson
 import           Data.ByteString (append)
 import           Data.Text (Text)
 import           Data.Text.Encoding
-import           Control.Monad.IO.Class
 import           Data.Aeson.Lens
 import           Network.HTTP.Types.Header
-import           Control.Exception (throwIO)
+import           Control.Monad.Catch (MonadThrow, throwM)
 
 import           Network.Wit.Types (Config(..), Backend, ConverseException(..))
 import qualified Network.Wit.Types as C (token, session, version, url, backend)
@@ -36,13 +35,13 @@ data ConverseStatus = Stop
                     | Action Text Value 
                     deriving (Show, Eq)
 
-defaultConfig :: Config
+defaultConfig :: Config IO
 defaultConfig = 
   Config "" "" "20160526" "https://api.wit.ai/converse" defaultBackend
 
-converse :: (MonadIO m) => Config -> Value -> Maybe Text -> m ConverseStatus
+converse :: (Monad m, MonadThrow m) => Config m -> Value -> Maybe Text -> m ConverseStatus
 converse conf context mtext = do
-  res <- liftIO $ backend headers params url context
+  res <- backend headers params url context
   maybe (err res) return $ toConverseStatus res
   where 
     backend = conf ^. C.backend 
@@ -50,7 +49,8 @@ converse conf context mtext = do
     headers = headersFromConfig conf
     params = maybe id (appendParam "q") mtext $ paramsFromConfig conf
     appendParam k v ps = (k,v):ps
-    err val = liftIO $ throwIO (UnexpectedResponse val)
+    err val = throwM (UnexpectedResponse val)
+
       
 -------------------------------------------------------------------------------- 
 toConverseStatus :: Value -> Maybe ConverseStatus
@@ -62,12 +62,12 @@ toConverseStatus val =
     Just "stop"   -> Just Stop
     _             -> Nothing
 
-headersFromConfig :: Config -> [Header]
+headersFromConfig :: Config m -> [Header]
 headersFromConfig conf = [(hAuthorization, "Bearer " `append` token)]
   where
     token = encodeUtf8 $ conf ^. C.token
 
-paramsFromConfig :: Config -> [(Text, Text)]
+paramsFromConfig :: Config m -> [(Text, Text)]
 paramsFromConfig conf = [ ("session_id", conf ^. C.session) 
                         , ("v", conf ^. C.version)]
 

@@ -7,6 +7,7 @@ import           Network.Wit
 import           Control.Lens
 import           Data.Aeson
 import qualified Data.HashMap.Strict as M
+import           Control.Exception (SomeException, fromException)
 
 sampleAction = Object $ M.fromList [("type", String "action")
                                    ,("action", String "getForecast")
@@ -17,10 +18,12 @@ sampleMessage = Object $ M.fromList [("type", String "msg")
 
 sampleStop = Object $ M.fromList [("type", String "stop")]
 
-testBackend :: Value -> Backend
+sampleWronResponse = Object $ M.fromList [("type", String "action")]
+
+testBackend :: Value -> Backend (Either SomeException)
 testBackend v _ _ _ _ = return v
 
-confWithResult :: Value -> Config
+confWithResult :: Value -> Config (Either SomeException)
 confWithResult v = defaultConfig & backend .~ testBackend v
 
 {-# ANN main ("HLint: ignore Redundant do" :: String) #-}
@@ -28,12 +31,15 @@ main :: IO ()
 main = hspec $ do
   describe "converse" $ do
     it "parses actions" $ do
-      r <- converse (confWithResult sampleAction) Null (Just "What is the weather") 
+      let (Right r) = converse (confWithResult sampleAction) Null (Just "What is the weather") 
       r `shouldBe` Action "getForecast" Null
     it "parses messages" $ do
-      r <- converse (confWithResult sampleMessage) Null Nothing
+      let (Right r) = converse (confWithResult sampleMessage) Null Nothing
       r `shouldBe` Message "Message"
     it "parses stop" $ do
-      r <- converse (confWithResult sampleStop) Null Nothing
+      let (Right r) = converse (confWithResult sampleStop) Null Nothing
       r `shouldBe` Stop
+    it "throws exception for unexpected response" $ do
+      let (Left r) = converse (confWithResult sampleWronResponse) Null Nothing
+      fromException r `shouldBe` Just (UnexpectedResponse sampleWronResponse)
 

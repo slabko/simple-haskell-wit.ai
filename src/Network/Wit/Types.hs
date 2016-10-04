@@ -18,21 +18,21 @@ import           Data.Text (Text)
 import           Network.HTTP.Types.Header
 import           Control.Exception
 
-type Backend = [Header] ->            -- Headers
-               [(Text, Text)] ->      -- Params 
-               String ->              -- URL
-               Value ->               -- Payload 
-               IO Value
+type Backend m = [Header] ->            -- Headers
+                 [(Text, Text)] ->      -- Params 
+                 String ->              -- URL
+                 Value ->               -- Payload 
+                 m Value
 
 data ConverseException = NotJSONResponse | UnexpectedResponse Value deriving (Show, Eq)
 instance Exception ConverseException
 
-data Config = Config {
+data Config m = Config {
     _token   :: Text
   , _session :: Text
   , _version :: Text
   , _url     :: String
-  , _backend :: Backend
+  , _backend :: Backend m
 }
 
 makeLenses ''Config

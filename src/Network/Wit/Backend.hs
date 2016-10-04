@@ -8,7 +8,7 @@ import           Data.Aeson.Lens
 import           Control.Exception
 import           Network.Wit.Types (Backend, ConverseException(..))
 
-defaultBackend :: Backend
+defaultBackend :: Backend IO
 defaultBackend hs ps url body = 
   postWith opts url body >>= getJSONPayload
   where
