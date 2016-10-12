@@ -5,23 +5,22 @@ module Main where
 
 import           Network.Wit hiding (session, token)
 import qualified Network.Wit as W (session, token)
-import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as M
 import           Control.Monad.State.Lazy
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import           Data.Aeson (Value(..))
-import           Data.Aeson.Lens
 import           Control.Lens
 import           System.IO (hFlush, stdout)
 import           Control.Exception
 import qualified System.Random as R
-import           Data.Monoid (First)
+
+import           Actions
+import           Actions.GetForecast
 --------------------------------------------------------------------------------
 data AppState = AppState { 
-    _context :: HashMap Text Value
-  , _params  :: HashMap Text Text
+    _context :: Value
+  , _params  :: Value
   , _config  :: Config IO
 } 
 
@@ -35,62 +34,55 @@ main :: IO ()
 main = do
   rnd <- R.randomIO :: IO Int
   let sess = T.pack . show $ rnd
-  let emptyState = AppState M.empty M.empty (makeConfig sess)
-  evalStateT (getUserMessage >>= next . Just) emptyState
+  let emptyState = AppState Null Null (makeConfig sess)
+  evalStateT (forever $ getUserMessage >>= next . Just) emptyState
   
-process :: ConverseStatus -> StateT AppState IO ()
-process (Action action ps) = execute action ps >> next Nothing
-process (Message msg) = printMessage msg >> next Nothing
-process Stop = getUserMessage >>= next . Just
-
 next :: Maybe Text -> StateT AppState IO ()
 next msg = do
-  conf <- use config
-  cont <- use context
-  status <- liftIO $ converse conf (Object cont) msg
+  conf   <- use config
+  cont   <- use context
+  status <- liftIO $ converse conf cont msg
   process status
 
-execute :: Text -> Value -> StateT AppState IO ()
-execute "getForecast" v = getForecast v
-execute cmd _ = liftIO . throwIO $ CommandNotFound cmd 
+process :: ConverseStatus -> StateT AppState IO ()
+process (Message msg)    = printMessage msg >> next Nothing
+process (Action name ps) = action name ps   >> next Nothing
+process Stop             = return ()
 
-getUserMessage :: StateT AppState IO Text
-getUserMessage = do
-  liftIO $ putStr ">" >> hFlush stdout
-  liftIO T.getLine
-
-printMessage :: Text -> StateT AppState IO ()
-printMessage msg = liftIO $ T.putStrLn msg
+action :: Text -> Value -> StateT AppState IO ()
+action name ps = do
+  modify' (`mergeAppState` ps)
+  s <- use params
+  c <- executeAction name s
+  context .= c
 
 --------------------------------------------------------------------------------
-getForecast :: Value -> StateT AppState IO ()
-getForecast v = do
-  mloc <- getParam "location" (v ^? locationKey)
-  mdate <- getParam "date" (v ^? dateKey)
-  case (mloc, mdate) of
-    (Just loc, Just date) -> context .= forecast
-      where forecast = M.singleton "forecast" (forecastMessage loc date)
-    (Nothing, _) -> context .= M.singleton "missingLocation" (Bool True)
-    _ -> context .= M.singleton "missingDate" (Bool True)
+getUserMessage :: (MonadIO m) => m Text
+getUserMessage = do
+  liftIO $ putStr "> " >> hFlush stdout
+  liftIO T.getLine
 
-forecastMessage :: Text -> Text -> Value
-forecastMessage l d = 
-  String $ mconcat ["The weather at ", d, " in ", l, " will be good."]
+printMessage :: (MonadIO m) => Text -> m ()
+printMessage msg = liftIO $ T.putStrLn msg
 
-locationKey :: Getting (First Text) Value Text
-locationKey = key "location" . values . key "value" . _String
+executeAction :: (MonadIO m) => Text -> Value -> m Value
+executeAction "getForecast" v =  execute getForcast v
+executeAction cmd _ = liftIO . throwIO $ CommandNotFound cmd 
 
-dateKey :: Getting (First Text) Value Text
-dateKey = key "datetime" . values . key "value" . _String
+execute :: (FromValue i, ToValue o, MonadIO m) => 
+           (i -> IO o) -> Value -> m Value
+execute f v = do
+  c <- liftIO . f $ fromValue v
+  return $ toValue c
 
 --------------------------------------------------------------------------------
 makeConfig :: Text -> Config IO
 makeConfig s = defaultConfig & W.token .~ "--- YOUR TOKEN HERE ---"
                              & W.session .~ s
 
-getParam :: Text -> Maybe Text -> StateT AppState IO (Maybe Text)
-getParam k Nothing = use $ params . at k
-getParam k (Just val) = do
-  params %= M.insert k val
-  getParam k Nothing
+mergeAppState :: AppState -> Value -> AppState
+mergeAppState (AppState cx (Object m1) cf) (Object m2) = AppState cx (Object $ M.union m2 m1) cf
+mergeAppState (AppState cx Null cf) (Object m) = AppState cx (Object m) cf 
+mergeAppState (AppState cx (Object m) cf) Null = AppState cx (Object m) cf
+mergeAppState state _ = state
 
